@@ -1,18 +1,46 @@
-__pycache__/
-.vscode
+# Private local files
+*.csv
+*.log
+*.pickle
+*.parquet
+*.xlsx
+*.ipynb
+.idea/
+*.iml
+*.pyc
+*.json
+*.pem
 
+local_classifier/
+
+# Mac/OSX
+.DS_Store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+__pycache__
+.vscode
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+# Distribution / packaging
+dist/
+*.egg-info/
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+
+# predefined
 outputs/
 temp.py
-
-# assets/
-
-temp_gpt2.py    
-
+temp_gpt2.py
 smoothquart.py
-
-
 checkpoints/*
-
 output.wav
-
 logs/
