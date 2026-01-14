@@ -558,8 +558,7 @@ class IndexTTS2:
 
         # Optional: initial silence between sentences
         sil_dur = int(sampling_rate * interval_silence / 1000.0)
-        sil_pcm16 = (torch.zeros(1, sil_dur).to(torch.int16)).numpy().tobytes()
-
+        sil_pcm16 = torch.zeros(1, sil_dur, dtype=torch.int16).numpy().reshape(-1).tobytes()
         first = True
         for sent in sentences:
             # Do your existing per-sentence generation,
@@ -597,7 +596,9 @@ class IndexTTS2:
                         len_ = (code == self.stop_mel_token).nonzero(as_tuple=False)[0] + 1
                         code_len = len_ - 1
                     code_lens.append(code_len)
-                codes = codes[:, :code_len]
+
+                max_len = int(max(code_lens))
+                codes = codes[:, :max_len]
                 code_lens = torch.LongTensor(code_lens).to(self.device)
 
                 use_speed = torch.zeros(spk_cond_emb.size(0)).to(spk_cond_emb.device).long()
@@ -639,13 +640,15 @@ class IndexTTS2:
                 wav = wav.squeeze(1)
 
             wav = torch.clamp(32767 * wav, -32767.0, 32767.0).to(torch.int16).cpu()
-            pcm16_bytes = wav.numpy().tobytes()
+            pcm16_bytes = wav.numpy().reshape(-1).tobytes()
 
             if not first and interval_silence > 0:
                 yield sampling_rate, sil_pcm16
 
             first = False
-            yield sampling_rate, pcm16_bytes
+            chunk = 8192  # bytes
+            for i in range(0, len(pcm16_bytes), chunk):
+                yield sampling_rate, pcm16_bytes[i:i + chunk]
 
 
 def find_most_similar_cosine(query_vector, matrix):
