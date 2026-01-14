@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import soundfile as sf
 
 from loguru import logger
@@ -87,69 +88,73 @@ async def health_check():
         }
     )
 
-
-@app.post('/tts_url', responses={
-    200: {'content': {'application/octet-stream': {}}},
-    500: {'content': {'application/json': {}}}
-})
+@app.post("/tts_url")
 async def tts_api_url(request: Request):
     try:
         data = await request.json()
-        emo_control_method = data.get('emo_control_method', 0)
-        text = data['text']
-        spk_audio_path = data['spk_audio_path']
-        emo_ref_path = data.get('emo_ref_path', None)
-        emo_weight = data.get('emo_weight', 1.0)
-        emo_vec = data.get('emo_vec', [0] * 8)
-        emo_text = data.get('emo_text', None)
-        emo_random = data.get('emo_random', False)
-        max_text_tokens_per_sentence = data.get('max_text_tokens_per_sentence', 120)
+        emo_control_method = data.get("emo_control_method", 0)
+        text = data["text"]
+        spk_audio_path = data["spk_audio_path"]
+        emo_ref_path = data.get("emo_ref_path", None)
+        emo_weight = data.get("emo_weight", 1.0)
+        emo_vec = data.get("emo_vec", [0] * 8)
+        emo_text = data.get("emo_text", None)
+        emo_random = data.get("emo_random", False)
+        max_text_tokens_per_sentence = data.get("max_text_tokens_per_sentence", 120)
 
         global tts
         if type(emo_control_method) is not int:
             emo_control_method = emo_control_method.value
+
         if emo_control_method == 0:
             emo_ref_path = None
             emo_weight = 1.0
-        if emo_control_method == 1:
-            emo_weight = emo_weight
-        if emo_control_method == 2:
+            vec = None
+        elif emo_control_method == 1:
+            vec = None
+        elif emo_control_method == 2:
             vec = emo_vec
             vec_sum = sum(vec)
             if vec_sum > 1.5:
                 return JSONResponse(
                     status_code=500,
-                    content={
-                        'status': 'error',
-                        'error': '情感向量之和不能超过1.5，请调整后重试。'
-                    }
+                    content={"status": "error", "error": "情感向量之和不能超过1.5，请调整后重试。"},
                 )
         else:
             vec = None
 
-        # logger.info(f'Emo control mode:{emo_control_method}, vec:{vec}')
-        sr, wav = await tts.infer(spk_audio_prompt=spk_audio_path, text=text,
-                        output_path=None,
-                        emo_audio_prompt=emo_ref_path, emo_alpha=emo_weight,
-                        emo_vector=vec,
-                        use_emo_text=(emo_control_method==3), emo_text=emo_text,use_random=emo_random,
-                        max_text_tokens_per_sentence=int(max_text_tokens_per_sentence))
-        
-        with io.BytesIO() as wav_buffer:
-            sf.write(wav_buffer, wav, sr, format='WAV')
-            wav_bytes = wav_buffer.getvalue()
+        async def gen():
+            # Stream WAV header first, then PCM16 chunks
+            sr = 22050
+            ch = 1
+            yield wav_header(sr, ch, 16)
 
-        return Response(content=wav_bytes, media_type='audio/wav')
-    
-    except Exception as ex:
-        tb_str = ''.join(traceback.format_exception(type(ex), ex, ex.__traceback__))
-        return JSONResponse(
-            status_code=500,
-            content={
-                'status': 'error',
-                'error': str(tb_str)
-            }
+            async for sr_out, pcm16 in tts.infer_stream(
+                spk_audio_prompt=spk_audio_path,
+                text=text,
+                emo_audio_prompt=emo_ref_path,
+                emo_alpha=emo_weight,
+                emo_vector=vec,
+                use_emo_text=(emo_control_method == 3),
+                emo_text=emo_text,
+                use_random=emo_random,
+                max_text_tokens_per_sentence=int(max_text_tokens_per_sentence),
+            ):
+                yield pcm16
+
+        return StreamingResponse(
+            gen(),
+            media_type="audio/wav",
+            headers={
+                "X-Audio-Sample-Rate": "22050",
+                "X-Audio-Channels": "1",
+                "X-Audio-Format": "s16le",
+            },
         )
+
+    except Exception as ex:
+        tb_str = "".join(traceback.format_exception(type(ex), ex, ex.__traceback__))
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(tb_str)})
 
 
 if __name__ == '__main__':
